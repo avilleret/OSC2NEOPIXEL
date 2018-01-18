@@ -11,29 +11,39 @@
 #include <Arduino.h>
 #include <OSCBundle.h>
 
-#include <FastLED.h>
+#include <OctoWS2811.h>
 
 #include <PacketSerial.h>
 
-#define NUM_LEDS 200     // <-- # of LEDs in strip 1
+#define LED_NUMBER 140     // <-- # of LEDs in strip 1
 
-#define DATA_PIN 3     // <-- pin number for DATA (MOSI, green wire)
-#define CLOCK_PIN 13    // <-- pin number for CLOCK (SCK, yellow wire) - NB: use 27 for teensy >= 3.5 / for teensy <3.5, use pin 13 (which causes the LED to stay lit)
+DMAMEM int displayMemory[6*LED_NUMBER];
+unsigned char buffer[LED_NUMBER*3];
+const int config = WS2811_GRB | WS2811_800kHz;
+
+OctoWS2811 leds(LED_NUMBER, displayMemory, NULL, config);
 
 // Use the serial device with PacketSerial
-PacketSerial_<SLIP, SLIP::END, 512> serial;
-
-CRGB leds1[NUM_LEDS];
+PacketSerial_<SLIP, SLIP::END, 8192> serial;
 
 bool val = false;
 
 // Parsing the OSC messages for /1 (int or Blob)
 void LEDcontrol1(OSCMessage &msg)
 {
+
   // When receiving a Blob, we assume it's a list of RGB values
   if (msg.isBlob(0))
   {
-    msg.getBlob(0, (unsigned char *)leds1, NUM_LEDS*3);
+    msg.getBlob(0, (unsigned char *)buffer, LED_NUMBER*3);
+
+    for (int i=0; i<LED_NUMBER; i++)
+    {
+      int color =  buffer[i*3+2];
+      color |=  buffer[i*3+1] << 8;
+      color |=  buffer[i*3] << 16;
+      leds.setPixel(i, color);
+    }
   }
 }
 
@@ -43,8 +53,6 @@ void LEDcontrol1(OSCMessage &msg)
 void onPacket(const uint8_t* buffer, size_t size) {
   OSCBundle bundleIN;
 
-  Serial.println("packet");
-
   for (size_t i = 0; i < size; i++) {
     bundleIN.fill(buffer[i]);
   }
@@ -52,7 +60,8 @@ void onPacket(const uint8_t* buffer, size_t size) {
   if (!bundleIN.hasError()) {
     bundleIN.dispatch("/1", LEDcontrol1);
   }
-  FastLED.show();
+  if(!leds.busy())
+    leds.show();
 }
 
 
@@ -62,11 +71,12 @@ void setup() {
   serial.setPacketHandler(&onPacket);
   serial.begin(115200); // baudrate is ignored, is always run at 12Mbps
 
-  // Add the LED controller to FastLED
-  FastLED.addLeds<NEOPIXEL, DATA_PIN>(leds1, NUM_LEDS);
-
-    // Turn off all LEDs
-  FastLED.show(CRGB::Black);
+  leds.begin();
+  for (int i=0;i<LED_NUMBER;i++)
+  {
+    leds.setPixel(i,0);
+  }
+  leds.show();
 }
 
 
